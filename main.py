@@ -83,3 +83,6 @@ def place_order(direction, symbol, qty_pct, sl, tp):
         print("✅ Zlecenie zrealizowane:", response.json())
     except requests.exceptions.RequestException as e:
         print("❌ Błąd przy składaniu zlecenia:", e)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
