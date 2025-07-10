@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # Ustawienia API Capital.com
-CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY") or "O8gMfVZEJVzA77F9"
+CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY") or "TWOJ_API_KEY"
 CAPITAL_API_URL = "https://api-capital.backend-capital.com"
 
 # Endpoint webhooka z TradingView
