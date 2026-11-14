@@ -1,18 +1,17 @@
 # Building Gateway — sterownik Control4 → MQTT
 
-Prototyp (v0.1.0) sterownika DriverWorks, który udostępnia urządzenia z projektu
+Prototyp (v0.2.0) sterownika DriverWorks, który udostępnia urządzenia z projektu
 Control4 przez MQTT. Jeden egzemplarz na kontroler (lokal). Sterownik łączy się
 z brokerem na serwerze budynku, publikuje stan urządzeń i wykonuje komendy.
 
-**Stan:** logika przetestowana na atrapie API (`test/`), **nieuruchamiana jeszcze
-na prawdziwym kontrolerze**.
+**Stan:** przetestowany na atrapie API Control4 z prawdziwym brokerem MQTT
+(`test/`, Lua 5.1), **nieuruchamiany jeszcze na prawdziwym kontrolerze**.
 
 ## Wymagania
 
-- Wbudowany klient MQTT (`C4:MQTT`). Dokumentacja Control4 podaje go jako dostępny
-  od OS 4.0.0; otwarty sterownik `finitelabs/control4-mqtt` deklaruje działanie od
-  OS 3.3. Na starszym systemie sterownik pokaże w polu *Status*:
-  `MQTT API not available on this OS version`.
+- Control4 OS 2.10.0 lub nowszy. Sterownik ma własną obsługę MQTT 3.1.1 i JSON,
+  więc nie korzysta z wbudowanego klienta MQTT (dostępnego dopiero w nowszych OS)
+  i ten sam plik działa na wszystkich kontrolerach.
 - Broker MQTT osiągalny z kontrolera (np. Mosquitto).
 - Composer Pro.
 
@@ -20,7 +19,7 @@ na prawdziwym kontrolerze**.
 
 ```sh
 ./build.sh          # tworzy dist/building_gateway.c4z
-python3 test/run_test.py   # testy na atrapie (wymaga: pip install lupa)
+python3 test/run_test.py   # testy (wymaga: pip install lupa amqtt paho-mqtt)
 ```
 
 ## Instalacja
@@ -75,8 +74,11 @@ mosquitto_pub -h <serwer> -u <user> -P <hasło> -t 'c4/101/cmd' \
 
 ## Znane ograniczenia
 
-- **Brak TLS** — login i hasło idą otwartym tekstem; do czasu dodania TLS używać
-  tylko w wydzielonej sieci budynku.
+- **Brak TLS** — API gniazd TCP w sterownikach nie daje szyfrowania, więc login
+  i hasło idą otwartym tekstem. Używać tylko w wydzielonej sieci budynku (VLAN),
+  bez dostępu z internetu.
+- **QoS 0** — komunikaty nie są potwierdzane. Stan jest publikowany jako retained
+  i w całości odświeżany po każdym ponownym połączeniu.
 - Format danych zwracanych przez `C4:GetDevices` i `C4:GetDeviceVariables` na
   prawdziwym kontrolerze nie był weryfikowany — w razie pustej listy urządzeń
   uruchom akcję *Dump* i sprawdź wynik.

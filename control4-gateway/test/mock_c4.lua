@@ -1,9 +1,10 @@
 -- Minimal stand-in for the Control4 DriverWorks runtime, used by run_test.py.
+-- The TCP client is bridged to a real socket by the Python side.
 Properties = {
-	["Broker Address"] = "10.0.0.5", ["Port"] = "1883", ["Username"] = "unit101",
+	["Broker Address"] = "127.0.0.1", ["Port"] = "18883", ["Username"] = "unit101",
 	["Password"] = "secret", ["Unit ID"] = "unit 101", ["Device Filter"] = "", ["Debug"] = "Off",
 }
-Mock = { published = {}, sent = {}, listeners = {}, timers = {}, props = {}, subs = {}, client = nil }
+Mock = { sent = {}, listeners = {}, timers = {}, props = {}, clients = {} }
 
 local variables = {
 	[41] = { ["1000"] = { name = "LIGHT_STATE", value = "0" }, ["1001"] = { name = "LIGHT_LEVEL", value = "0" } },
@@ -14,14 +15,12 @@ C4 = {}
 function C4:UpdateProperty(name, value) Mock.props[name] = value end
 function C4:GetUniqueMAC() return "000FFF112233" end
 function C4:GetDeviceID() return 99 end
-function C4:JsonEncode(value) return py_json_encode(value) end
-function C4:JsonDecode(text) return py_json_decode(text) end
 function C4:GetDevices()
 	return {
-		[41] = { driverFileName = "light_v2.c4i", deviceName = "Kitchen Dimmer", roomId = "16", roomName = "Kitchen" },
-		[52] = { driverFileName = "thermostatV2.c4i", deviceName = "Thermostat", roomId = "16", roomName = "Kitchen" },
-		[60] = { driverFileName = "novars.c4z", deviceName = "No Vars", roomId = "16", roomName = "Kitchen" },
-		[99] = { driverFileName = "building_gateway.c4z", deviceName = "Gateway", roomId = "16", roomName = "Kitchen" },
+		[41] = { driverFileName = "light_v2.c4i", deviceName = "Kitchen \"Dimmer\"", roomId = "16", roomName = "Kuchnia ąę" },
+		[52] = { driverFileName = "thermostatV2.c4i", deviceName = "Thermostat", roomId = "16", roomName = "Kuchnia ąę" },
+		[60] = { driverFileName = "novars.c4z", deviceName = "No Vars", roomId = "16", roomName = "Kuchnia ąę" },
+		[99] = { driverFileName = "building_gateway.c4z", deviceName = "Gateway", roomId = "16", roomName = "Kuchnia ąę" },
 	}
 end
 function C4:GetDeviceVariables(id) return variables[id] or {} end
@@ -31,23 +30,23 @@ function C4:RegisterVariableListener(dev, var)
 end
 function C4:UnregisterVariableListener(dev, var) Mock.listeners[dev .. "/" .. var] = nil end
 function C4:SendToDevice(dev, cmd, params) table.insert(Mock.sent, { dev = dev, cmd = cmd, params = params }) end
-function C4:SetTimer(delay, fn)
-	local t = { delay = delay, fn = fn, cancelled = false }
+function C4:SetTimer(delay, fn, repeating)
+	local t = { delay = delay, fn = fn, repeating = repeating, cancelled = false }
 	function t:Cancel() self.cancelled = true end
 	table.insert(Mock.timers, t)
 	return t
 end
-function C4:MQTT(clientId)
-	local c = { clientId = clientId, cb = {}, disconnected = false }
-	function c:SetUsernameAndPassword(u, p) self.user, self.pass = u, p; return 0 end
-	function c:SetWill(t, p, q, r) self.will = { t, p, q, r }; return 0 end
-	function c:OnConnect(f) self.cb.connect = f end
-	function c:OnDisconnect(f) self.cb.disconnect = f end
-	function c:OnMessage(f) self.cb.message = f end
-	function c:Connect(h, p, k) self.host, self.port = h, p; return 0 end
-	function c:Disconnect() self.disconnected = true; return 0 end
-	function c:Subscribe(t, q) Mock.subs[t] = true; return 0, 1 end
-	function c:Publish(t, p, q, r) table.insert(Mock.published, { topic = t, payload = p, retain = r }); return 0, #Mock.published end
-	Mock.client = c
+function C4:CreateTCPClient()
+	local c = { cb = {}, wantRead = false, closed = false }
+	c.index = #Mock.clients + 1
+	function c:OnConnect(f) self.cb.connect = f; return self end
+	function c:OnRead(f) self.cb.read = f; return self end
+	function c:OnDisconnect(f) self.cb.disconnect = f; return self end
+	function c:OnError(f) self.cb.error = f; return self end
+	function c:Connect(host, port) py_tcp_connect(self.index, host, port); return self end
+	function c:Write(data) py_tcp_write(self.index, data); return self end
+	function c:ReadUpTo(max) self.wantRead = true; return self end
+	function c:Close(flush) self.closed = true; py_tcp_close(self.index) end
+	table.insert(Mock.clients, c)
 	return c
 end

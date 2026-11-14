@@ -1,7 +1,7 @@
 <devicedata>
   <copyright>Private use</copyright>
   <name>Building Gateway</name>
-  <version>1</version>
+  <version>2</version>
   <manufacturer>Custom</manufacturer>
   <model>Building Gateway</model>
   <creator>Custom</creator>
@@ -11,7 +11,7 @@
   <created>11/14/2026 12:00:00 PM</created>
   <modified>11/14/2026 12:00:00 PM</modified>
   <combo>true</combo>
-  <minimum_os_version>3.3.0</minimum_os_version>
+  <minimum_os_version>2.10.0</minimum_os_version>
   <composer_categories>
     <category>Utility</category>
   </composer_categories>

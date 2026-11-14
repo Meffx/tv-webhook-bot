@@ -9,14 +9,22 @@
 --   cmd                       incoming commands (JSON)
 --   cmd/result                result of each command (JSON)
 
-DRIVER_VERSION = "0.1.0"
+DRIVER_VERSION = "0.2.0"
 
 local RECONNECT_MIN_MS = 2000
 local RECONNECT_MAX_MS = 60000
 
-local mqtt = nil
+local KEEPALIVE_S = 60
+local TICK_MS = 20000
+local CONNECT_TIMEOUT_S = 15
+
+local socket = nil
 local generation = 0 -- incremented on every connect; stale callbacks are ignored
-local connected = false
+local connected = false -- true after the broker accepted the MQTT session
+local connectStarted = 0
+local lastReceived = 0
+local rxBuffer = ""
+local tickTimer = nil
 local reconnectTimer = nil
 local reconnectDelay = RECONNECT_MIN_MS
 
@@ -54,27 +62,250 @@ local function topic(suffix)
 	return "c4/" .. unitId() .. "/" .. suffix
 end
 
+---------------------------------------------------------------------------
+-- JSON (pure Lua, so the driver does not depend on the OS version)
+---------------------------------------------------------------------------
+
+local ESCAPES = { ['"'] = '\\"', ["\\"] = "\\\\", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+
+local function jsonString(text)
+	text = string.gsub(text, '[%c"\\]', function(c)
+		return ESCAPES[c] or string.format("\\u%04x", string.byte(c))
+	end)
+	return '"' .. text .. '"'
+end
+
+-- Tables are always encoded as objects with string keys.
+local function jsonEncode(value)
+	local kind = type(value)
+	if kind == "table" then
+		local parts = {}
+		for k, v in pairs(value) do
+			parts[#parts + 1] = jsonString(tostring(k)) .. ":" .. jsonEncode(v)
+		end
+		table.sort(parts)
+		return "{" .. table.concat(parts, ",") .. "}"
+	elseif kind == "string" then
+		return jsonString(value)
+	elseif kind == "number" or kind == "boolean" then
+		return tostring(value)
+	end
+	return "null"
+end
+
+local function utf8Char(code)
+	if code < 0x80 then
+		return string.char(code)
+	elseif code < 0x800 then
+		return string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+	end
+	return string.char(0xE0 + math.floor(code / 0x1000), 0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+end
+
+local UNESCAPES = { b = "\b", f = "\f", n = "\n", r = "\r", t = "\t" }
+
+-- Returns the decoded value, or nil and an error message.
+local function jsonDecode(text)
+	local pos = 1
+	local parseValue
+
+	local function skip()
+		pos = string.find(text, "[^ \t\r\n]", pos) or (#text + 1)
+	end
+
+	local function parseString()
+		local out = {}
+		pos = pos + 1
+		while true do
+			local c = string.sub(text, pos, pos)
+			if c == "" then
+				error("unterminated string")
+			elseif c == '"' then
+				pos = pos + 1
+				return table.concat(out)
+			elseif c == "\\" then
+				local e = string.sub(text, pos + 1, pos + 1)
+				if e == "u" then
+					local hex = string.match(text, "^%x%x%x%x", pos + 2)
+					if not hex then
+						error("bad unicode escape")
+					end
+					out[#out + 1] = utf8Char(tonumber(hex, 16))
+					pos = pos + 6
+				else
+					out[#out + 1] = UNESCAPES[e] or e
+					pos = pos + 2
+				end
+			else
+				local stop = string.find(text, '["\\]', pos) or (#text + 1)
+				out[#out + 1] = string.sub(text, pos, stop - 1)
+				pos = stop
+			end
+		end
+	end
+
+	parseValue = function()
+		skip()
+		local c = string.sub(text, pos, pos)
+		if c == "{" then
+			local obj = {}
+			pos = pos + 1
+			skip()
+			if string.sub(text, pos, pos) == "}" then
+				pos = pos + 1
+				return obj
+			end
+			while true do
+				skip()
+				if string.sub(text, pos, pos) ~= '"' then
+					error("expected key")
+				end
+				local key = parseString()
+				skip()
+				if string.sub(text, pos, pos) ~= ":" then
+					error("expected ':'")
+				end
+				pos = pos + 1
+				obj[key] = parseValue()
+				skip()
+				local sep = string.sub(text, pos, pos)
+				pos = pos + 1
+				if sep == "}" then
+					return obj
+				elseif sep ~= "," then
+					error("expected ',' or '}'")
+				end
+			end
+		elseif c == "[" then
+			local arr = {}
+			pos = pos + 1
+			skip()
+			if string.sub(text, pos, pos) == "]" then
+				pos = pos + 1
+				return arr
+			end
+			while true do
+				arr[#arr + 1] = parseValue()
+				skip()
+				local sep = string.sub(text, pos, pos)
+				pos = pos + 1
+				if sep == "]" then
+					return arr
+				elseif sep ~= "," then
+					error("expected ',' or ']'")
+				end
+			end
+		elseif c == '"' then
+			return parseString()
+		elseif string.sub(text, pos, pos + 3) == "true" then
+			pos = pos + 4
+			return true
+		elseif string.sub(text, pos, pos + 4) == "false" then
+			pos = pos + 5
+			return false
+		elseif string.sub(text, pos, pos + 3) == "null" then
+			pos = pos + 4
+			return nil
+		end
+		local num = string.match(text, "^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+		if not num or not tonumber(num) then
+			error("unexpected character at " .. pos)
+		end
+		pos = pos + #num
+		return tonumber(num)
+	end
+
+	local ok, result = pcall(function()
+		local value = parseValue()
+		skip()
+		if pos <= #text then
+			error("trailing data")
+		end
+		return value
+	end)
+	if ok then
+		return result
+	end
+	return nil, tostring(result)
+end
+
+---------------------------------------------------------------------------
+-- MQTT 3.1.1 packet encoding (QoS 0 only)
+---------------------------------------------------------------------------
+
+local function mqttString(text)
+	return string.char(math.floor(#text / 256), #text % 256) .. text
+end
+
+local function mqttPacket(firstByte, body)
+	local len, header = #body, ""
+	repeat
+		local digit = len % 128
+		len = math.floor(len / 128)
+		if len > 0 then
+			digit = digit + 128
+		end
+		header = header .. string.char(digit)
+	until len == 0
+	return string.char(firstByte) .. header .. body
+end
+
+local function mqttConnectPacket(clientId, username, password, willTopic, willPayload)
+	local flags = 2 + 4 + 32 -- clean session, will, will retain
+	local payload = mqttString(clientId) .. mqttString(willTopic) .. mqttString(willPayload)
+	if username ~= "" then
+		flags = flags + 128
+		payload = payload .. mqttString(username)
+		if password ~= "" then
+			flags = flags + 64
+			payload = payload .. mqttString(password)
+		end
+	end
+	local body = mqttString("MQTT") .. string.char(4, flags, math.floor(KEEPALIVE_S / 256), KEEPALIVE_S % 256)
+	return mqttPacket(0x10, body .. payload)
+end
+
+-- Takes one complete packet off the front of the buffer.
+-- Returns firstByte, body, rest - or nil when more data is needed.
+local function mqttTakePacket(buffer)
+	local multiplier, len, index = 1, 0, 2
+	while true do
+		local digit = string.byte(buffer, index)
+		if not digit then
+			return nil
+		end
+		len = len + (digit % 128) * multiplier
+		if digit < 128 then
+			break
+		end
+		multiplier = multiplier * 128
+		index = index + 1
+		if index > 5 then
+			return false -- malformed length
+		end
+	end
+	if #buffer < index + len then
+		return nil
+	end
+	return string.byte(buffer, 1), string.sub(buffer, index + 1, index + len), string.sub(buffer, index + len + 1)
+end
+
+local function send(data)
+	if socket then
+		socket:Write(data)
+	end
+end
+
 local function publish(suffix, payload, retain)
-	if not (mqtt and connected) then
+	if not (socket and connected) then
 		return false
 	end
-	local rc, _, err = mqtt:Publish(topic(suffix), payload, 1, retain == true)
-	if rc ~= 0 then
-		log("publish to " .. suffix .. " failed: " .. tostring(err or rc))
-		return false
-	end
+	send(mqttPacket(retain and 0x31 or 0x30, mqttString(topic(suffix)) .. payload))
 	return true
 end
 
 local function encode(value)
-	local ok, json, err = pcall(function()
-		return C4:JsonEncode(value)
-	end)
-	if ok and json then
-		return json
-	end
-	log("JSON encode failed: " .. tostring(err or json))
-	return nil
+	return jsonEncode(value)
 end
 
 ---------------------------------------------------------------------------
@@ -191,10 +422,8 @@ end
 -- Payload: {"id":"abc","device":41,"command":"RAMP_TO_LEVEL","params":{"LEVEL":60,"TIME":1000}}
 -- Gateway commands (no "device"): {"command":"RESCAN"}
 local function handleCommand(payload)
-	local ok, msg = pcall(function()
-		return C4:JsonDecode(payload)
-	end)
-	if not ok or type(msg) ~= "table" then
+	local msg = jsonDecode(payload)
+	if type(msg) ~= "table" then
 		return nil, "invalid JSON"
 	end
 	local command = msg.command
@@ -230,7 +459,7 @@ local function handleCommand(payload)
 	return msg.id, nil
 end
 
-local function onMessage(_, _, msgTopic, payload)
+local function onMessage(msgTopic, payload)
 	if msgTopic ~= topic("cmd") then
 		return
 	end
@@ -250,7 +479,7 @@ local function onMessage(_, _, msgTopic, payload)
 end
 
 ---------------------------------------------------------------------------
--- MQTT connection
+-- MQTT connection (over C4:CreateTCPClient, available on OS 2.x and later)
 ---------------------------------------------------------------------------
 
 local connect -- forward declaration
@@ -273,21 +502,78 @@ local function scheduleReconnect()
 	end)
 end
 
-local function dropClient()
+local function dropSocket()
 	generation = generation + 1
 	connected = false
-	if mqtt then
-		local old = mqtt
-		mqtt = nil
+	rxBuffer = ""
+	if socket then
+		local old = socket
+		socket = nil
 		pcall(function()
-			old:Disconnect()
+			old:Close(true)
 		end)
+	end
+end
+
+local function connectionLost(reason)
+	dropSocket()
+	setStatus("Disconnected: " .. tostring(reason))
+	scheduleReconnect()
+end
+
+local function onSessionAccepted()
+	connected = true
+	reconnectDelay = RECONNECT_MIN_MS
+	send(mqttPacket(0x82, string.char(0, 1) .. mqttString(topic("cmd")) .. string.char(0)))
+	publish("status", "online", true)
+	local count = rescan()
+	setStatus("Connected, mirroring " .. count .. " devices")
+end
+
+local function onPacket(firstByte, body)
+	local kind = math.floor(firstByte / 16)
+	if kind == 2 then -- CONNACK
+		local code = string.byte(body, 2) or 255
+		if code == 0 then
+			onSessionAccepted()
+		else
+			connectionLost("broker refused the connection (code " .. code .. ")")
+		end
+	elseif kind == 3 and connected then -- PUBLISH
+		local qos = math.floor(firstByte / 2) % 4
+		local topicLen = (string.byte(body, 1) or 0) * 256 + (string.byte(body, 2) or 0)
+		local msgTopic = string.sub(body, 3, 2 + topicLen)
+		local payloadStart = 3 + topicLen
+		if qos > 0 then
+			if qos == 1 then
+				send(mqttPacket(0x40, string.sub(body, payloadStart, payloadStart + 1)))
+			end
+			payloadStart = payloadStart + 2
+		end
+		onMessage(msgTopic, string.sub(body, payloadStart))
+	end
+	-- SUBACK and PINGRESP need no action; lastReceived is updated by the caller.
+end
+
+local function onData(data)
+	lastReceived = os.time()
+	rxBuffer = rxBuffer .. data
+	while socket do
+		local firstByte, body, rest = mqttTakePacket(rxBuffer)
+		if firstByte == false then
+			connectionLost("malformed data from broker")
+			return
+		elseif not firstByte then
+			return
+		end
+		rxBuffer = rest
+		onPacket(firstByte, body)
 	end
 end
 
 connect = function()
 	cancelReconnect()
-	dropClient()
+	dropSocket()
 
 	local host = prop("Broker Address")
 	if host == "" then
@@ -295,62 +581,60 @@ connect = function()
 		return
 	end
 
-	local hasApi = pcall(function()
-		return C4.MQTT ~= nil or error("missing")
+	local myGeneration = generation
+	local port = tonumber(prop("Port")) or 1883
+	connectStarted = os.time()
+	lastReceived = connectStarted
+	setStatus("Connecting to " .. host)
+
+	local client = C4:CreateTCPClient()
+	socket = client
+	client:OnConnect(function(c)
+		if myGeneration ~= generation then
+			return
+		end
+		c:Write(mqttConnectPacket("c4-gateway-" .. unitId(), prop("Username"), prop("Password"), topic("status"), "offline"))
+		c:ReadUpTo(4096)
 	end)
-	if not hasApi then
-		setStatus("MQTT API not available on this OS version")
+	client:OnRead(function(c, data)
+		if myGeneration ~= generation then
+			return
+		end
+		onData(data or "")
+		if myGeneration == generation then
+			c:ReadUpTo(4096)
+		end
+	end)
+	client:OnDisconnect(function(_, errCode, errMsg)
+		if myGeneration == generation then
+			connectionLost((errCode and errCode ~= 0) and errMsg or "closed by broker")
+		end
+	end)
+	client:OnError(function(_, code, msg)
+		if myGeneration == generation then
+			connectionLost(msg or code)
+		end
+	end)
+
+	if not client:Connect(host, port) then
+		connectionLost("cannot start connection")
+	end
+end
+
+-- Runs every TICK_MS: keeps the session alive and detects dead connections.
+local function tick()
+	if not socket then
 		return
 	end
-
-	local myGeneration = generation
-	local client = C4:MQTT("c4-gateway-" .. unitId())
-	mqtt = client
-
-	local username = prop("Username")
-	if username ~= "" then
-		client:SetUsernameAndPassword(username, prop("Password"))
-	end
-	client:SetWill(topic("status"), "offline", 1, true)
-
-	client:OnConnect(function(_, reasonCode, _, message)
-		if myGeneration ~= generation then
-			return
+	local now = os.time()
+	if connected then
+		if now - lastReceived > KEEPALIVE_S * 1.5 then
+			connectionLost("broker not responding")
+		else
+			send(mqttPacket(0xC0, ""))
 		end
-		if reasonCode ~= 0 then
-			setStatus("Connection refused: " .. tostring(message or reasonCode))
-			scheduleReconnect()
-			return
-		end
-		connected = true
-		reconnectDelay = RECONNECT_MIN_MS
-		client:Subscribe(topic("cmd"), 1)
-		publish("status", "online", true)
-		local count = rescan()
-		setStatus("Connected, mirroring " .. count .. " devices")
-	end)
-
-	client:OnDisconnect(function(_, reasonCode, message)
-		if myGeneration ~= generation then
-			return
-		end
-		connected = false
-		setStatus("Disconnected: " .. tostring(message or reasonCode))
-		scheduleReconnect()
-	end)
-
-	client:OnMessage(function(...)
-		if myGeneration == generation then
-			onMessage(...)
-		end
-	end)
-
-	setStatus("Connecting to " .. host)
-	local port = tonumber(prop("Port")) or 1883
-	local rc, err = client:Connect(host, port, 60)
-	if rc ~= nil and rc ~= 0 then
-		setStatus("Connect failed: " .. tostring(err or rc))
-		scheduleReconnect()
+	elseif now - connectStarted > CONNECT_TIMEOUT_S then
+		connectionLost("connection timed out")
 	end
 end
 
@@ -389,16 +673,22 @@ end
 
 function OnDriverLateInit()
 	C4:UpdateProperty("Driver Version", DRIVER_VERSION)
+	tickTimer = C4:SetTimer(TICK_MS, tick, true)
 	connect()
 end
 
 function OnDriverDestroyed()
 	cancelReconnect()
-	unwatchAll()
-	if mqtt and connected then
-		publish("status", "offline", true)
+	if tickTimer then
+		tickTimer:Cancel()
+		tickTimer = nil
 	end
-	dropClient()
+	unwatchAll()
+	if connected then
+		publish("status", "offline", true)
+		send(mqttPacket(0xE0, ""))
+	end
+	dropSocket()
 end
 
 function OnPropertyChanged(strProperty)
