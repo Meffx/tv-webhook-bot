@@ -1,0 +1,99 @@
+<devicedata>
+  <copyright>Private use</copyright>
+  <name>Building Gateway</name>
+  <version>1</version>
+  <manufacturer>Custom</manufacturer>
+  <model>Building Gateway</model>
+  <creator>Custom</creator>
+  <control>lua_gen</control>
+  <controlmethod>ip</controlmethod>
+  <driver>DriverWorks</driver>
+  <created>11/14/2026 12:00:00 PM</created>
+  <modified>11/14/2026 12:00:00 PM</modified>
+  <combo>true</combo>
+  <minimum_os_version>3.3.0</minimum_os_version>
+  <composer_categories>
+    <category>Utility</category>
+  </composer_categories>
+  <config>
+    <script file="driver.lua"/>
+    <properties>
+      <property>
+        <name>Status</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Driver Version</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Broker Address</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Port</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>1</minimum>
+        <maximum>65535</maximum>
+        <default>1883</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Username</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Password</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>false</readonly>
+        <password>true</password>
+      </property>
+      <property>
+        <name>Unit ID</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Device Filter</name>
+        <type>STRING</type>
+        <default/>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Debug</name>
+        <type>LIST</type>
+        <items>
+          <item>Off</item>
+          <item>On</item>
+        </items>
+        <default>Off</default>
+        <readonly>false</readonly>
+      </property>
+    </properties>
+    <actions>
+      <action>
+        <name>Reconnect</name>
+        <command>Reconnect</command>
+      </action>
+      <action>
+        <name>Rescan Devices</name>
+        <command>Rescan</command>
+      </action>
+      <action>
+        <name>Dump Devices To Lua Output</name>
+        <command>Dump</command>
+      </action>
+    </actions>
+  </config>
+  <connections/>
+</devicedata>
