@@ -1,7 +1,7 @@
 """Runs driver.lua against a mock Control4 runtime and a real MQTT broker.
 
-The driver's own MQTT implementation talks over a real TCP socket to an amqtt
-broker; a paho-mqtt client observes and sends commands.
+The driver's own MQTT implementation talks over real TLS and TCP sockets to an
+amqtt broker; a paho-mqtt client observes and sends commands.
 
 Usage: pip install lupa amqtt paho-mqtt && python3 test/run_test.py
 """
@@ -11,6 +11,9 @@ import logging
 import pathlib
 import select
 import socket
+import ssl
+import subprocess
+import tempfile
 import threading
 import time
 
@@ -18,9 +21,25 @@ import lupa.lua51 as lupa  # Control4 runs Lua 5.1
 import paho.mqtt.client as paho
 from amqtt.broker import Broker
 
-PORT = 18883
+PORT = 18883  # plain TCP
+TLS_PORT = 18884
 root = pathlib.Path(__file__).resolve().parent.parent
 logging.disable(logging.CRITICAL)
+
+# --- test certificates: own CA and a server certificate for 127.0.0.1 ---------
+certs = pathlib.Path(tempfile.mkdtemp())
+
+
+def openssl(*args):
+    subprocess.run(["openssl", *args], cwd=certs, check=True, capture_output=True)
+
+
+openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=Test CA",
+        "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-keyout", "ca.key", "-out", "ca.pem")
+openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1", "-keyout", "server.key", "-out", "server.csr")
+(certs / "ext").write_text("subjectAltName=IP:127.0.0.1\n")
+openssl("x509", "-req", "-in", "server.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial",
+        "-days", "2", "-extfile", "ext", "-out", "server.pem")
 
 # --- broker ---------------------------------------------------------------
 loop = asyncio.new_event_loop()
@@ -32,7 +51,11 @@ def run_broker():
     asyncio.set_event_loop(loop)
     broker = Broker(
         {
-            "listeners": {"default": {"type": "tcp", "bind": f"127.0.0.1:{PORT}"}},
+            "listeners": {
+                "default": {"type": "tcp", "bind": f"127.0.0.1:{PORT}"},
+                "tls": {"type": "tcp", "bind": f"127.0.0.1:{TLS_PORT}", "ssl": True,
+                        "certfile": str(certs / "server.pem"), "keyfile": str(certs / "server.key")},
+            },
             "plugins": {"amqtt.plugins.authentication.AnonymousAuthPlugin": {"allow_anonymous": True}},
         },
         loop=loop,
@@ -59,52 +82,66 @@ observer.connect("127.0.0.1", PORT)
 observer.subscribe("c4/#")
 observer.loop_start()
 
-# --- Lua runtime with the TCP client bridged to real sockets ---------------
+# --- Lua runtime with network bindings bridged to real sockets --------------
 lua = lupa.LuaRuntime(unpack_returned_tuples=True, encoding=None)  # strings are bytes
 g = lua.globals()
-socks = {}
-pending_connect = set()
+conns = {}  # (binding, port) -> socket
+events = []  # pending OnConnectionStatusChanged calls
+ca_file = certs / "ca.pem"  # what the driver's "./ca.pem" resolves to in this test
+handshake_errors = []
 
 
-def tcp_connect(index, host, port):
-    socks[index] = socket.create_connection((host.decode(), int(port)))
-    pending_connect.add(index)
+def net_connect(binding, port, host, kind, options):
+    sock = socket.create_connection((host.decode(), int(port)))
+    if kind == b"SSL":
+        if options.VERIFY_MODE == b"peer":
+            assert options.CACERTFILE == b"./ca.pem", options.CACERTFILE
+            ctx = ssl.create_default_context(cafile=str(ca_file))
+        else:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        try:
+            sock = ctx.wrap_socket(sock, server_hostname=host.decode())
+        except ssl.SSLError as exc:
+            handshake_errors.append(exc)
+            return  # like Director: no ONLINE event when the handshake fails
+    conns[(binding, port)] = sock
+    events.append((binding, port, b"ONLINE"))
 
 
-def tcp_write(index, data):
-    socks[index].sendall(data)
-
-
-def tcp_close(index):
-    sock = socks.pop(index, None)
+def net_disconnect(binding, port):
+    sock = conns.pop((binding, port), None)
     if sock:
         sock.close()
+        events.append((binding, port, b"OFFLINE"))
 
 
-g.py_tcp_connect, g.py_tcp_write, g.py_tcp_close = tcp_connect, tcp_write, tcp_close
+def net_send(binding, port, data):
+    conns[(binding, port)].sendall(data)
+
+
+g.py_net_connect, g.py_net_disconnect, g.py_net_send = net_connect, net_disconnect, net_send
 lua.execute((root / "test" / "mock_c4.lua").read_bytes())
 lua.execute((root / "driver" / "driver.lua").read_bytes())
 mock = g.Mock
 
 
 def pump(seconds=0.6):
-    """Delivers socket events to the driver, like Director would."""
+    """Delivers network events to the driver, like Director would."""
     end = time.time() + seconds
     while time.time() < end:
-        for index in list(pending_connect):
-            pending_connect.discard(index)
-            client = mock.clients[index]
-            client.cb.connect(client)
-        for index, sock in list(socks.items()):
-            client = mock.clients[index]
-            if client.wantRead and select.select([sock], [], [], 0.02)[0]:
+        while events:
+            g.OnConnectionStatusChanged(*events.pop(0))
+        for key, sock in list(conns.items()):
+            pending = getattr(sock, "pending", lambda: 0)()
+            if pending or select.select([sock], [], [], 0.02)[0]:
                 data = sock.recv(4096)
                 if data:
-                    client.wantRead = False
-                    client.cb.read(client, data)
+                    g.ReceivedFromNetwork(key[0], key[1], data)
                 else:
-                    socks.pop(index).close()
-                    client.cb.disconnect(client, 0, b"")
+                    conns.pop(key).close()
+                    events.append((key[0], key[1], b"OFFLINE"))
         time.sleep(0.01)
 
 
@@ -116,9 +153,12 @@ def status():
     return mock.props[b"Status"].decode()
 
 
-# Start-up: session accepted, status, device list and initial state published.
+# Start-up over TLS with certificate verification: session accepted, status,
+# device list and initial state published.
 g.OnDriverLateInit()
 pump()
+assert isinstance(conns[(6001, TLS_PORT)], ssl.SSLSocket)
+assert mock.net.options.VERIFY_MODE == b"peer" and mock.net.options.KEEP_CONNECTION is False
 assert status() == "Connected, mirroring 2 devices", status()
 assert last("c4/unit_101/status") == "online"
 devices = json.loads(last("c4/unit_101/devices"))["devices"]
@@ -178,8 +218,7 @@ pump(0.3)
 assert status().startswith("Connected"), status()
 
 # Broker drops the connection: last will is published, driver reconnects.
-first = mock.clients[1]
-socks[1].shutdown(socket.SHUT_RDWR)
+conns[(6001, TLS_PORT)].shutdown(socket.SHUT_RDWR)
 pump(0.5)
 assert last("c4/unit_101/status") == "offline"
 assert status().startswith("Disconnected"), status()
@@ -189,11 +228,29 @@ timer.fn(timer)
 pump()
 assert status() == "Connected, mirroring 1 devices", status()
 assert last("c4/unit_101/status") == "online"
-assert len(list(mock.clients.values())) == 2 and first.closed
+
+# A broker certificate from an untrusted CA is rejected: no session, no data sent.
+ca_file = pathlib.Path("/etc/ssl/certs/ca-certificates.crt")
+g.OnPropertyChanged(b"Verify Certificate")
+pump(0.5)
+assert handshake_errors and status().startswith("Connecting"), status()
+assert last("c4/unit_101/status") == "offline"
+assert not conns
+ca_file = certs / "ca.pem"
+
+# Switching encryption off reconnects over plain TCP.
+g.Properties[b"Encryption"] = b"None"
+g.Properties[b"Port"] = str(PORT).encode()
+g.OnPropertyChanged(b"Port")
+pump()
+assert status() == "Connected, mirroring 1 devices", status()
+assert not isinstance(conns[(6001, PORT)], ssl.SSLSocket) and mock.net.kind == b"TCP"
+assert last("c4/unit_101/status") == "online"
 
 # Clean shutdown reports offline.
 g.OnDriverDestroyed()
 pump(0.4)
 assert last("c4/unit_101/status") == "offline"
+assert not conns
 
 print("all tests passed")

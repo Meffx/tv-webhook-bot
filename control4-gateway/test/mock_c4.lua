@@ -1,10 +1,10 @@
 -- Minimal stand-in for the Control4 DriverWorks runtime, used by run_test.py.
--- The TCP client is bridged to a real socket by the Python side.
+-- Network bindings are bridged to real TCP/TLS sockets by the Python side.
 Properties = {
-	["Broker Address"] = "127.0.0.1", ["Port"] = "18883", ["Username"] = "unit101",
+	["Broker Address"] = "127.0.0.1", ["Port"] = "18884", ["Encryption"] = "TLS", ["Verify Certificate"] = "On", ["Username"] = "unit101",
 	["Password"] = "secret", ["Unit ID"] = "unit 101", ["Device Filter"] = "", ["Debug"] = "Off",
 }
-Mock = { sent = {}, listeners = {}, timers = {}, props = {}, clients = {} }
+Mock = { sent = {}, listeners = {}, timers = {}, props = {}, net = nil }
 
 local variables = {
 	[41] = { ["1000"] = { name = "LIGHT_STATE", value = "0" }, ["1001"] = { name = "LIGHT_LEVEL", value = "0" } },
@@ -36,17 +36,8 @@ function C4:SetTimer(delay, fn, repeating)
 	table.insert(Mock.timers, t)
 	return t
 end
-function C4:CreateTCPClient()
-	local c = { cb = {}, wantRead = false, closed = false }
-	c.index = #Mock.clients + 1
-	function c:OnConnect(f) self.cb.connect = f; return self end
-	function c:OnRead(f) self.cb.read = f; return self end
-	function c:OnDisconnect(f) self.cb.disconnect = f; return self end
-	function c:OnError(f) self.cb.error = f; return self end
-	function c:Connect(host, port) py_tcp_connect(self.index, host, port); return self end
-	function c:Write(data) py_tcp_write(self.index, data); return self end
-	function c:ReadUpTo(max) self.wantRead = true; return self end
-	function c:Close(flush) self.closed = true; py_tcp_close(self.index) end
-	table.insert(Mock.clients, c)
-	return c
-end
+function C4:CreateNetworkConnection(binding, host, kind) Mock.net = { binding = binding, host = host, kind = kind } end
+function C4:NetPortOptions(binding, port, kind, options) Mock.net.port, Mock.net.portKind, Mock.net.options = port, kind, options end
+function C4:NetConnect(binding, port) py_net_connect(binding, port, Mock.net.host, Mock.net.kind, Mock.net.options) end
+function C4:NetDisconnect(binding, port) py_net_disconnect(binding, port) end
+function C4:SendToNetwork(binding, port, data) py_net_send(binding, port, data) end

@@ -1,7 +1,7 @@
 <devicedata>
   <copyright>Private use</copyright>
   <name>Building Gateway</name>
-  <version>2</version>
+  <version>3</version>
   <manufacturer>Custom</manufacturer>
   <model>Building Gateway</model>
   <creator>Custom</creator>
@@ -41,7 +41,27 @@
         <type>RANGED_INTEGER</type>
         <minimum>1</minimum>
         <maximum>65535</maximum>
-        <default>1883</default>
+        <default>8883</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Encryption</name>
+        <type>LIST</type>
+        <items>
+          <item>TLS</item>
+          <item>None</item>
+        </items>
+        <default>TLS</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Verify Certificate</name>
+        <type>LIST</type>
+        <items>
+          <item>On</item>
+          <item>Off</item>
+        </items>
+        <default>On</default>
         <readonly>false</readonly>
       </property>
       <property>

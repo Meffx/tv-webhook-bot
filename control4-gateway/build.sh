@@ -4,5 +4,5 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p dist
 rm -f dist/building_gateway.c4z
-(cd driver && zip -q -X ../dist/building_gateway.c4z driver.xml driver.lua)
+(cd driver && zip -q -X ../dist/building_gateway.c4z driver.xml driver.lua ca.pem)
 echo "Built dist/building_gateway.c4z"

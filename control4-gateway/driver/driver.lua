@@ -9,7 +9,7 @@
 --   cmd                       incoming commands (JSON)
 --   cmd/result                result of each command (JSON)
 
-DRIVER_VERSION = "0.2.0"
+DRIVER_VERSION = "0.3.0"
 
 local RECONNECT_MIN_MS = 2000
 local RECONNECT_MAX_MS = 60000
@@ -18,8 +18,11 @@ local KEEPALIVE_S = 60
 local TICK_MS = 20000
 local CONNECT_TIMEOUT_S = 15
 
-local socket = nil
-local generation = 0 -- incremented on every connect; stale callbacks are ignored
+local NET_BINDING = 6001 -- dynamic network connection used for the broker
+local CA_FILE = "./ca.pem" -- bundled in the .c4z, used to verify the broker
+
+local activePort = nil -- port of the connection attempt in progress, nil when idle
+local online = false -- true while the TCP/TLS connection is up
 local connected = false -- true after the broker accepted the MQTT session
 local connectStarted = 0
 local lastReceived = 0
@@ -291,13 +294,13 @@ local function mqttTakePacket(buffer)
 end
 
 local function send(data)
-	if socket then
-		socket:Write(data)
+	if activePort and online then
+		C4:SendToNetwork(NET_BINDING, activePort, data)
 	end
 end
 
 local function publish(suffix, payload, retain)
-	if not (socket and connected) then
+	if not connected then
 		return false
 	end
 	send(mqttPacket(retain and 0x31 or 0x30, mqttString(topic(suffix)) .. payload))
@@ -479,7 +482,7 @@ local function onMessage(msgTopic, payload)
 end
 
 ---------------------------------------------------------------------------
--- MQTT connection (over C4:CreateTCPClient, available on OS 2.x and later)
+-- MQTT connection over a dynamic network binding (plain TCP or TLS)
 ---------------------------------------------------------------------------
 
 local connect -- forward declaration
@@ -503,15 +506,13 @@ local function scheduleReconnect()
 end
 
 local function dropSocket()
-	generation = generation + 1
+	local port = activePort
+	activePort = nil
+	online = false
 	connected = false
 	rxBuffer = ""
-	if socket then
-		local old = socket
-		socket = nil
-		pcall(function()
-			old:Close(true)
-		end)
+	if port then
+		C4:NetDisconnect(NET_BINDING, port)
 	end
 end
 
@@ -558,7 +559,7 @@ end
 local function onData(data)
 	lastReceived = os.time()
 	rxBuffer = rxBuffer .. data
-	while socket do
+	while activePort do
 		local firstByte, body, rest = mqttTakePacket(rxBuffer)
 		if firstByte == false then
 			connectionLost("malformed data from broker")
@@ -581,49 +582,61 @@ connect = function()
 		return
 	end
 
-	local myGeneration = generation
-	local port = tonumber(prop("Port")) or 1883
+	local tls = prop("Encryption") ~= "None"
+	local kind = tls and "SSL" or "TCP"
+	local port = tonumber(prop("Port")) or (tls and 8883 or 1883)
+	local options = {
+		AUTO_CONNECT = false,
+		MONITOR_CONNECTION = false,
+		KEEP_CONNECTION = false, -- reconnecting is handled here, with backoff
+		KEEP_ALIVE = true,
+		DELIMITER = "",
+		SUPPRESS_CONNECTION_EVENTS = true,
+	}
+	if tls then
+		if prop("Verify Certificate") == "Off" then
+			options.VERIFY_MODE = "none"
+		else
+			options.VERIFY_MODE = "peer"
+			options.CACERTFILE = CA_FILE
+		end
+	end
+
 	connectStarted = os.time()
 	lastReceived = connectStarted
-	setStatus("Connecting to " .. host)
+	setStatus("Connecting to " .. host .. ":" .. port .. (tls and " (TLS)" or " (no encryption)"))
 
-	local client = C4:CreateTCPClient()
-	socket = client
-	client:OnConnect(function(c)
-		if myGeneration ~= generation then
-			return
-		end
-		c:Write(mqttConnectPacket("c4-gateway-" .. unitId(), prop("Username"), prop("Password"), topic("status"), "offline"))
-		c:ReadUpTo(4096)
-	end)
-	client:OnRead(function(c, data)
-		if myGeneration ~= generation then
-			return
-		end
-		onData(data or "")
-		if myGeneration == generation then
-			c:ReadUpTo(4096)
-		end
-	end)
-	client:OnDisconnect(function(_, errCode, errMsg)
-		if myGeneration == generation then
-			connectionLost((errCode and errCode ~= 0) and errMsg or "closed by broker")
-		end
-	end)
-	client:OnError(function(_, code, msg)
-		if myGeneration == generation then
-			connectionLost(msg or code)
-		end
-	end)
+	activePort = port
+	C4:CreateNetworkConnection(NET_BINDING, host, kind)
+	C4:NetPortOptions(NET_BINDING, port, kind, options)
+	C4:NetConnect(NET_BINDING, port)
+end
 
-	if not client:Connect(host, port) then
-		connectionLost("cannot start connection")
+function OnConnectionStatusChanged(idBinding, nPort, strStatus)
+	if tonumber(idBinding) ~= NET_BINDING or tonumber(nPort) ~= activePort then
+		return
+	end
+	if strStatus == "ONLINE" then
+		if not online then
+			online = true
+			lastReceived = os.time()
+			send(mqttConnectPacket("c4-gateway-" .. unitId(), prop("Username"), prop("Password"), topic("status"), "offline"))
+		end
+	elseif online then
+		-- OFFLINE before ONLINE is left to the connect timeout in tick()
+		connectionLost("connection closed")
+	end
+end
+
+function ReceivedFromNetwork(idBinding, nPort, strData)
+	if tonumber(idBinding) == NET_BINDING and tonumber(nPort) == activePort and online then
+		onData(strData or "")
 	end
 end
 
 -- Runs every TICK_MS: keeps the session alive and detects dead connections.
 local function tick()
-	if not socket then
+	if not activePort then
 		return
 	end
 	local now = os.time()
@@ -698,7 +711,8 @@ function OnPropertyChanged(strProperty)
 			setStatus("Connected, mirroring " .. count .. " devices")
 		end
 	elseif strProperty == "Broker Address" or strProperty == "Port" or strProperty == "Username"
-		or strProperty == "Password" or strProperty == "Unit ID" then
+		or strProperty == "Password" or strProperty == "Unit ID"
+		or strProperty == "Encryption" or strProperty == "Verify Certificate" then
 		reconnectDelay = RECONNECT_MIN_MS
 		connect()
 	end
