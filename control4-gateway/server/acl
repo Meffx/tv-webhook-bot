@@ -1,0 +1,9 @@
+# Installed by setup.sh as /etc/mosquitto/acl.
+
+# The backend sees every unit.
+user backend
+topic readwrite c4/#
+
+# Each controller logs in with its Unit ID as the username and can only
+# touch its own topics.
+pattern readwrite c4/%u/#
