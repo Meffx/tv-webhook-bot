@@ -4,12 +4,12 @@
 --
 -- Topics (prefix: c4/<Unit ID>/):
 --   status                    "online" / "offline" (retained, last will)
---   devices                   JSON list of mirrored devices and their variables (retained)
+--   devices                   JSON list of mirrored devices, their type and variables (retained)
 --   state/<deviceId>/<varId>  current variable value (retained)
 --   cmd                       incoming commands (JSON)
 --   cmd/result                result of each command (JSON)
 
-DRIVER_VERSION = "0.3.0"
+DRIVER_VERSION = "0.4.0"
 
 local RECONNECT_MIN_MS = 2000
 local RECONNECT_MAX_MS = 60000
@@ -329,6 +329,35 @@ local function matchesFilter(driverFileName)
 	return false
 end
 
+-- Device classes recognised from the proxy driver file name. Only these are
+-- mirrored, whatever the Device Filter says: other drivers (cameras, voice
+-- services, intercoms) keep passwords and pairing codes in their variables.
+local DEVICE_TYPES = {
+	{ pattern = "^light", type = "light" },
+	{ pattern = "^blind", type = "blind" },
+	{ pattern = "^thermostat", type = "thermostat" },
+	{ pattern = "^contactsingle_(.-)_c4%.c4i$", type = "contact" },
+	{ pattern = "^relaycontact_(.-)_c4%.c4i$", type = "relay" },
+	{ pattern = "^relaysingle_(.-)_c4%.c4i$", type = "relay" },
+}
+
+-- Returns the device type and, for contacts and relays, the kind
+-- (e.g. "watersensor", "garagedoor"); nil for drivers that are not mirrored.
+local function classify(driverFileName)
+	local name = string.lower(driverFileName or "")
+	for _, entry in ipairs(DEVICE_TYPES) do
+		local found, _, kind = string.find(name, entry.pattern)
+		if found then
+			return entry.type, kind
+		end
+	end
+	return nil
+end
+
+local function isTrue(value)
+	return value == true or string.lower(tostring(value)) == "true"
+end
+
 local function unwatchAll()
 	for deviceId, device in pairs(devices) do
 		for varId in pairs(device.variables) do
@@ -346,15 +375,18 @@ local function readVariables(deviceId)
 	if not ok or type(vars) ~= "table" then
 		return result
 	end
+	local dimmable = nil
 	for key, var in pairs(vars) do
 		if type(var) == "table" then
 			local varId = tonumber(key) or tonumber(var.id)
-			if varId then
+			if varId and not isTrue(var.hidden) then
 				result[varId] = tostring(var.name or varId)
+			elseif var.name == "Navigator Dynamic Capabilities" then
+				dimmable = string.find(tostring(var.value), "<dimmer>True</dimmer>", 1, true) ~= nil
 			end
 		end
 	end
-	return result
+	return result, dimmable
 end
 
 -- Finds devices, publishes the device list and starts watching their variables.
@@ -369,8 +401,12 @@ local function rescan()
 
 	for id, info in pairs(found) do
 		local deviceId = tonumber(id)
-		if deviceId and deviceId ~= selfId and type(info) == "table" and matchesFilter(info.driverFileName) then
-			local variables = readVariables(deviceId)
+		local deviceType, kind = nil, nil
+		if type(info) == "table" then
+			deviceType, kind = classify(info.driverFileName)
+		end
+		if deviceId and deviceId ~= selfId and deviceType and matchesFilter(info.driverFileName) then
+			local variables, dimmable = readVariables(deviceId)
 			if next(variables) ~= nil then
 				devices[deviceId] = {
 					name = info.deviceName,
@@ -386,6 +422,9 @@ local function rescan()
 				list[tostring(deviceId)] = {
 					name = info.deviceName or "",
 					driver = info.driverFileName or "",
+					type = deviceType,
+					kind = kind,
+					dimmable = dimmable,
 					roomId = tostring(info.roomId or ""),
 					room = info.roomName or "",
 					variables = varList,
@@ -655,29 +694,32 @@ end
 -- Diagnostics
 ---------------------------------------------------------------------------
 
--- Prints raw API results to the Lua output window in Composer.
+-- Prints what would be published (mirrored devices and their visible
+-- variables) to the Lua output window in Composer. Nothing else is printed,
+-- so the output is safe to share.
 local function dump()
-	local function show(value, indent, depth)
-		if type(value) ~= "table" or depth > 4 then
-			return tostring(value)
+	local selfId = C4:GetDeviceID()
+	local count = 0
+	for id, info in pairs(C4:GetDevices({}) or {}) do
+		local deviceId = tonumber(id)
+		local deviceType, kind = nil, nil
+		if type(info) == "table" then
+			deviceType, kind = classify(info.driverFileName)
 		end
-		local lines = {}
-		for k, v in pairs(value) do
-			lines[#lines + 1] = indent .. "  " .. tostring(k) .. " = " .. show(v, indent .. "  ", depth + 1)
+		if deviceId and deviceId ~= selfId and deviceType and matchesFilter(info.driverFileName) then
+			local variables, dimmable = readVariables(deviceId)
+			if next(variables) ~= nil then
+				count = count + 1
+				print(string.format("[%d] %s / %s  type=%s kind=%s dimmable=%s driver=%s", deviceId,
+					tostring(info.roomName), tostring(info.deviceName), deviceType, tostring(kind),
+					tostring(dimmable), tostring(info.driverFileName)))
+				for varId, varName in pairs(variables) do
+					print(string.format("    %d %s = %s", varId, varName, tostring(C4:GetDeviceVariable(deviceId, varId))))
+				end
+			end
 		end
-		return "{\n" .. table.concat(lines, "\n") .. "\n" .. indent .. "}"
 	end
-
-	local found = C4:GetDevices({}) or {}
-	print("=== C4:GetDevices({}) ===")
-	print(show(found, "", 0))
-	for id in pairs(found) do
-		local ok, vars = pcall(function()
-			return C4:GetDeviceVariables(tonumber(id))
-		end)
-		print("=== C4:GetDeviceVariables(" .. tostring(id) .. ") ===")
-		print(ok and show(vars, "", 0) or ("error: " .. tostring(vars)))
-	end
+	print("=== " .. count .. " devices would be mirrored ===")
 end
 
 ---------------------------------------------------------------------------

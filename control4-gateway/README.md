@@ -1,11 +1,13 @@
 # Building Gateway — sterownik Control4 → MQTT
 
-Prototyp (v0.3.0) sterownika DriverWorks, który udostępnia urządzenia z projektu
+Prototyp (v0.4.0) sterownika DriverWorks, który udostępnia urządzenia z projektu
 Control4 przez MQTT. Jeden egzemplarz na kontroler (lokal). Sterownik łączy się
 z brokerem na serwerze (w budynku lub w chmurze), publikuje stan urządzeń i wykonuje komendy.
 
 **Stan:** przetestowany na atrapie API Control4 z prawdziwym brokerem MQTT, po TLS
-i bez (`test/`, Lua 5.1), **nieuruchamiany jeszcze na prawdziwym kontrolerze**.
+i bez (`test/`, Lua 5.1). Na prawdziwym kontrolerze (EA-3) potwierdzone: sterownik
+się ładuje, a lista urządzeń i zmiennych ma oczekiwany format. Połączenie z brokerem
+i sterowanie na kontrolerze **nie były jeszcze sprawdzane**.
 
 ## Wymagania
 
@@ -38,11 +40,38 @@ python3 test/run_test.py   # testy (wymaga: pip install lupa amqtt paho-mqtt)
 | Verify Certificate | `On` (domyślnie) — certyfikat brokera musi pochodzić od urzędu z pliku `ca.pem` |
 | Username / Password | konto tego lokalu na brokerze |
 | Unit ID | identyfikator lokalu, np. `101`; puste = adres MAC kontrolera |
-| Device Filter | puste = wszystkie urządzenia; albo fragmenty nazw plików sterowników po przecinku, np. `light,thermostat,blind` |
+| Device Filter | puste = wszystkie obsługiwane typy; albo fragmenty nazw plików sterowników po przecinku, np. `light,blind`, żeby zawęzić |
 | Debug | `On` = logi w zakładce Lua |
 
 Akcje (zakładka *Actions*): **Reconnect**, **Rescan Devices**,
-**Dump Devices To Lua Output** (wypisuje surowe dane o urządzeniach i zmiennych).
+**Dump Devices To Lua Output** (wypisuje urządzenia i zmienne, które zostałyby
+opublikowane — bez ukrytych zmiennych i bez pomijanych sterowników).
+
+## Które urządzenia są udostępniane
+
+Tylko rozpoznane typy, po nazwie sterownika proxy:
+
+| Typ (`type`) | Sterownik proxy | Pole `kind` | Najważniejsze zmienne |
+|---|---|---|---|
+| `light` | `light_v2.c4i` | — (`dimmable`: true/false) | 1000 `LIGHT_STATE`, 1001 `Brightness Percent` |
+| `blind` | `blind.c4i` | — | 1004 `Level`, 1005 `Target Level`, 1000 `Open`, 1002 `Stopped` |
+| `thermostat` | `thermostatV2.c4i` | — | 1131 `TEMPERATURE_C`, 1133 `HEAT_SETPOINT_C`, 1104 `HVAC_MODE`, 1107 `HVAC_STATE` |
+| `contact` | `contactsingle_*_c4.c4i` | np. `watersensor`, `motionsensor`, `windowcontactsensor`, `doorcontactsensor`, `smokedetector` | 1000 `ContactState` |
+| `relay` | `relaycontact_*_c4.c4i`, `relaysingle_*_c4.c4i` | np. `garagedoor`, `electronicgate` | 1000 `RelayState` |
+
+Pozostałe sterowniki (kamery, domofon, usługi głosowe, multimedia, procedury) są
+pomijane niezależnie od *Device Filter*, bo trzymają w zmiennych hasła i kody
+parowania. Z tego samego powodu nie są publikowane zmienne oznaczone jako ukryte.
+
+Komendy wysyła się na identyfikator proxy (ten z listy `devices`). Typowe komendy
+Control4 — **do potwierdzenia na urządzeniach**:
+
+| Typ | Komendy |
+|---|---|
+| `light` | `ON`, `OFF`, `TOGGLE`, `RAMP_TO_LEVEL` `{LEVEL, TIME}` |
+| `blind` | `SET_LEVEL_TARGET` `{LEVEL_TARGET}`, `UP`, `DOWN`, `STOP` |
+| `thermostat` | `SET_SETPOINT_HEAT` `{CELSIUS}`, `SET_MODE_HVAC` `{MODE}` |
+| `relay` | `OPEN`, `CLOSE`, `TOGGLE`, `TRIGGER` `{TIME}` |
 
 ## Tematy MQTT
 
@@ -96,9 +125,6 @@ Do sprawdzenia na kontrolerze:
 
 - **QoS 0** — komunikaty nie są potwierdzane. Stan jest publikowany jako retained
   i w całości odświeżany po każdym ponownym połączeniu.
-- Format danych zwracanych przez `C4:GetDevices` i `C4:GetDeviceVariables` na
-  prawdziwym kontrolerze nie był weryfikowany — w razie pustej listy urządzeń
-  uruchom akcję *Dump* i sprawdź wynik.
 - Nieudane połączenie (zły adres, odrzucony certyfikat) jest zgłaszane dopiero po
   15 s jako `connection timed out`, bez podania przyczyny.
 - Brak zdalnej aktualizacji sterownika.

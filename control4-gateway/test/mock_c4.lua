@@ -6,9 +6,17 @@ Properties = {
 }
 Mock = { sent = {}, listeners = {}, timers = {}, props = {}, net = nil }
 
+local function var(name, value, hidden)
+	return { name = name, value = value, hidden = hidden and "True" or "False", readonly = "True" }
+end
 local variables = {
-	[41] = { ["1000"] = { name = "LIGHT_STATE", value = "0" }, ["1001"] = { name = "LIGHT_LEVEL", value = "0" } },
-	[52] = { ["1100"] = { name = "TEMPERATURE_C", value = "21.5" } },
+	[41] = {
+		["1000"] = var("LIGHT_STATE", "0"), ["1001"] = var("Brightness Percent", "0"),
+		["6661"] = var("Navigator Dynamic Capabilities", "<DynamicCapabilities><dimmer>True</dimmer></DynamicCapabilities>", true),
+	},
+	[52] = { ["1131"] = var("TEMPERATURE_C", "21.5"), ["1113"] = var("SCHEDULE", "<scheduleV2/>", true) },
+	[70] = { ["1004"] = var("SNAPSHOT_URL", "http://admin:hunter2@192.168.1.11/picture") },
+	[80] = { ["1000"] = var("ContactState", "1"), ["1003"] = var("LastActionTime", "1794573050", true) },
 }
 
 C4 = {}
@@ -17,13 +25,19 @@ function C4:GetUniqueMAC() return "000FFF112233" end
 function C4:GetDeviceID() return 99 end
 function C4:GetDevices()
 	return {
-		[41] = { driverFileName = "light_v2.c4i", deviceName = "Kitchen \"Dimmer\"", roomId = "16", roomName = "Kuchnia ąę" },
+		[40] = { driverFileName = "vendor_light_dim.c4z", deviceName = "Kitchen \"Dimmer\"", roomId = "16", roomName = "Kuchnia ąę",
+			proxies = { [41] = { driverFileName = "light_v2.c4i", deviceName = "Kitchen \"Dimmer\"" } } },
+		[41] = { driverFileName = "light_v2.c4i", deviceName = "Kitchen \"Dimmer\"", roomId = "16", roomName = "Kuchnia ąę",
+			protocol = { [40] = { driverFileName = "vendor_light_dim.c4z", deviceName = "Kitchen \"Dimmer\"" } } },
 		[52] = { driverFileName = "thermostatV2.c4i", deviceName = "Thermostat", roomId = "16", roomName = "Kuchnia ąę" },
-		[60] = { driverFileName = "novars.c4z", deviceName = "No Vars", roomId = "16", roomName = "Kuchnia ąę" },
+		[60] = { driverFileName = "blind.c4i", deviceName = "No Vars", roomId = "16", roomName = "Kuchnia ąę" },
+		[70] = { driverFileName = "vendor_camera.c4z", deviceName = "Camera", roomId = "16", roomName = "Kuchnia ąę" },
+		[80] = { driverFileName = "contactsingle_watersensor_c4.c4i", deviceName = "Czujnik Zalania", roomId = "16", roomName = "Kuchnia ąę" },
 		[99] = { driverFileName = "building_gateway.c4z", deviceName = "Gateway", roomId = "16", roomName = "Kuchnia ąę" },
 	}
 end
 function C4:GetDeviceVariables(id) return variables[id] or {} end
+function C4:GetDeviceVariable(dev, id) return variables[dev][tostring(id)].value end
 function C4:RegisterVariableListener(dev, var)
 	Mock.listeners[dev .. "/" .. var] = true
 	OnWatchedVariableChanged(dev, var, variables[dev][tostring(var)].value)

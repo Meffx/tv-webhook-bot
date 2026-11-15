@@ -159,13 +159,17 @@ g.OnDriverLateInit()
 pump()
 assert isinstance(conns[(6001, TLS_PORT)], ssl.SSLSocket)
 assert mock.net.options.VERIFY_MODE == b"peer" and mock.net.options.KEEP_CONNECTION is False
-assert status() == "Connected, mirroring 2 devices", status()
+assert status() == "Connected, mirroring 3 devices", status()
 assert last("c4/unit_101/status") == "online"
 devices = json.loads(last("c4/unit_101/devices"))["devices"]
-assert set(devices) == {"41", "52"}, devices  # no self, no variable-less device
-assert devices["41"]["variables"] == {"1000": "LIGHT_STATE", "1001": "LIGHT_LEVEL"}
+assert set(devices) == {"41", "52", "80"}, devices  # proxies only; no camera, no self
+assert devices["41"]["variables"] == {"1000": "LIGHT_STATE", "1001": "Brightness Percent"}  # hidden dropped
+assert (devices["41"]["type"], devices["41"]["dimmable"]) == ("light", True)
+assert (devices["80"]["type"], devices["80"]["kind"]) == ("contact", "watersensor")
+assert devices["52"]["type"] == "thermostat" and "kind" not in devices["52"]
+assert not any("hunter2" in p or "SNAPSHOT" in p or "/70/" in t for t, p, _ in seen)  # secrets stay local
 assert devices["41"]["name"] == 'Kitchen "Dimmer"' and devices["41"]["room"] == "Kuchnia ąę"
-assert ("c4/unit_101/state/52/1100", "21.5") in [(t, p) for t, p, _ in seen]
+assert ("c4/unit_101/state/52/1131", "21.5") in [(t, p) for t, p, _ in seen]
 
 # A variable change is mirrored; unknown devices are ignored.
 g.OnWatchedVariableChanged(41, 1001, b"60")
@@ -196,7 +200,7 @@ def cmd(payload, qos=0):
 assert cmd('{"id":"a1","device":41,"command":"RAMP_TO_LEVEL","params":{"LEVEL":60,"TIME":1000}}') == {"id": "a1", "ok": True}
 sent = mock.sent[1]
 assert (sent.dev, sent.cmd, sent.params.LEVEL, sent.params.TIME) == (41, b"RAMP_TO_LEVEL", 60, 1000)
-assert cmd('{"id":"a2","device":60,"command":"ON"}') == {"id": "a2", "ok": False, "error": "unknown device"}
+assert cmd('{"id":"a2","device":70,"command":"ON"}') == {"id": "a2", "ok": False, "error": "unknown device"}
 assert cmd("not json") == {"ok": False, "error": "invalid JSON"}
 assert cmd('{"id":"a3","command":"RESCAN"}') == {"id": "a3", "ok": True}
 assert cmd('{"id":"a4","device":52,"command":"SET_SETPOINT_HEAT","params":{"CELSIUS":21.5}}', qos=1) == {"id": "a4", "ok": True}
@@ -208,7 +212,7 @@ g.Properties[b"Device Filter"] = b"thermostat"
 g.OnPropertyChanged(b"Device Filter")
 pump(0.3)
 assert set(json.loads(last("c4/unit_101/devices"))["devices"]) == {"52"}
-assert set(mock.listeners.keys()) == {b"52/1100"}, list(mock.listeners.keys())
+assert set(mock.listeners.keys()) == {b"52/1131"}, list(mock.listeners.keys())
 
 # Keep-alive tick sends a ping and the session survives it.
 tick = mock.timers[1]
@@ -246,6 +250,12 @@ pump()
 assert status() == "Connected, mirroring 1 devices", status()
 assert not isinstance(conns[(6001, PORT)], ssl.SSLSocket) and mock.net.kind == b"TCP"
 assert last("c4/unit_101/status") == "online"
+
+# The diagnostic dump lists only what is mirrored.
+printed = []
+g.print = lambda *a: printed.append(b" ".join(a).decode())
+g.ExecuteCommand(b"LUA_ACTION", lua.table_from({b"ACTION": b"Dump"}))
+assert printed[-1] == "=== 1 devices would be mirrored ===" and not any("hunter2" in line for line in printed), printed
 
 # Clean shutdown reports offline.
 g.OnDriverDestroyed()
