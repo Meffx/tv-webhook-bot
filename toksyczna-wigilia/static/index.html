@@ -65,6 +65,11 @@ button.ghost{background:transparent}
 table{width:100%;border-collapse:collapse}
 td{padding:6px 4px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
 td:last-child{text-align:right;width:1%;white-space:nowrap}
+.reveal .who{min-height:1.1em}
+.who.spinning{opacity:.65;filter:blur(1.5px)}
+.who.pop{animation:pop .6s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{0%{transform:scale(.6)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){.who.pop{animation:none}}
 #snow{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:50}
 [hidden]{display:none!important}
 </style>
@@ -161,6 +166,21 @@ td:last-child{text-align:right;width:1%;white-space:nowrap}
   }
   function show(el,msg){el.textContent=msg;el.hidden=!msg}
 
+  // Animacja jest tylko dekoracją: wynik wylosował już serwer, nazwy w kółko to losowa mieszanka.
+  var reduced=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function spin(el,final,pool,done){
+    el.classList.remove("pop");
+    if(reduced||pool.length<2){el.textContent=final;done();return}
+    var i=0,delay=60,total=0;
+    el.classList.add("spinning");
+    (function step(){
+      if(total>2800){el.textContent=final;el.classList.remove("spinning");el.classList.add("pop");done();return}
+      el.textContent=pool[i++%pool.length];
+      total+=delay;delay=Math.round(delay*1.12);
+      setTimeout(step,delay);
+    })();
+  }
+
   // ----- uczestnik -----
   var S=null;
   function loadState(){
@@ -184,12 +204,15 @@ td:last-child{text-align:right;width:1%;white-space:nowrap}
     var pid=+$("who").value,name=S.people.filter(function(x){return x.id===pid})[0].name;
     $("drawBtn").disabled=true;
     api("POST","/api/draw",{person_id:+$("who").value,email:$("email").value}).then(function(r){
-      $("revFor").textContent=name;$("revWho").textContent=r.to;
+      $("revFor").textContent=name;
       var note=[];
       if(r.budget)note.push("Budżet: "+r.budget+" zł.");
       if(r.emailed)note.push("Wynik wysłaliśmy też na twój e-mail.");
-      $("revNote").textContent=note.join(" ");
       $("player").hidden=true;$("reveal").hidden=false;
+      $("revNote").textContent="Losuję…";$("revClose").hidden=true;
+      var pool=S.people.filter(function(x){return x.id!==pid}).map(function(x){return x.name})
+        .sort(function(){return Math.random()-.5});
+      spin($("revWho"),r.to,pool,function(){$("revNote").textContent=note.join(" ");$("revClose").hidden=false;$("revClose").focus()});
     }).catch(function(err){show($("drawErr"),err.message)}).then(function(){$("drawBtn").disabled=false});
   });
   $("revClose").addEventListener("click",function(){
