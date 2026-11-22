@@ -75,7 +75,7 @@ td:last-child{text-align:right;width:1%;white-space:nowrap}
   <header class="hero">
     <p class="eyebrow">Święta 2026</p>
     <h1 id="title">Toksyczna Wigilia</h1>
-    <p class="lead">Wybierz swoje imię, wpisz e-mail i wylosuj osobę, której kupujesz prezent. Losowanie robisz raz i nikt poza tobą nie zobaczy wyniku.</p>
+    <p class="lead">Wybierz swoje imię, wpisz e-mail i wylosuj osobę, której kupujesz prezent. Losowanie robisz raz, a wynik widzisz tylko ty. Zapamiętaj go albo zrób zrzut ekranu.</p>
   </header>
 
   <section id="player" class="card">
@@ -172,7 +172,7 @@ td:last-child{text-align:right;width:1%;white-space:nowrap}
       var sel=$("who"),cur=sel.value;
       sel.innerHTML="";
       var ph=document.createElement("option");ph.value="";ph.textContent="Wybierz imię";sel.appendChild(ph);
-      s.people.forEach(function(p){var o=document.createElement("option");o.value=p.id;o.textContent=p.name+(p.drawn?" ✓":"");sel.appendChild(o)});
+      s.people.forEach(function(p){var o=document.createElement("option");o.value=p.id;o.textContent=p.name+(p.drawn?" (już losował)":"");o.disabled=p.drawn;sel.appendChild(o)});
       sel.value=cur;
       $("budgetInfo").textContent=s.budget?"Budżet na prezent: "+s.budget+" zł.":"";
       $("mailHint").textContent=s.mail?"Kopię wyniku dostaniesz też mailem.":"";
@@ -181,12 +181,11 @@ td:last-child{text-align:right;width:1%;white-space:nowrap}
   $("drawForm").addEventListener("submit",function(e){
     e.preventDefault();show($("drawErr"),"");
     if(!$("who").value){show($("drawErr"),"Wybierz swoje imię.");return}
-    var name=$("who").options[$("who").selectedIndex].textContent.replace(" ✓","");
+    var pid=+$("who").value,name=S.people.filter(function(x){return x.id===pid})[0].name;
     $("drawBtn").disabled=true;
     api("POST","/api/draw",{person_id:+$("who").value,email:$("email").value}).then(function(r){
       $("revFor").textContent=name;$("revWho").textContent=r.to;
       var note=[];
-      if(r.already)note.push("Już losowałeś, to jest twój wcześniejszy wynik.");
       if(r.budget)note.push("Budżet: "+r.budget+" zł.");
       if(r.emailed)note.push("Wynik wysłaliśmy też na twój e-mail.");
       $("revNote").textContent=note.join(" ");

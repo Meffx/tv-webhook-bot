@@ -197,9 +197,7 @@ def draw():
             con.execute("ROLLBACK"); return jsonify(error="Ten e-mail nie pasuje do wybranej osoby."), 403
 
         if me["drawn_to"] is not None:
-            rcv = con.execute("SELECT name FROM people WHERE id=?", (me["drawn_to"],)).fetchone()
-            con.execute("COMMIT")
-            return jsonify(to=rcv["name"], already=True, budget=c["budget"], emailed=False)
+            con.execute("ROLLBACK"); return jsonify(error="Ta osoba już losowała. Losowania nie można powtórzyć."), 409
 
         target = pick_for(con, pid)
         if target is None:

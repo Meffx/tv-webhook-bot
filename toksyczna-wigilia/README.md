@@ -6,7 +6,7 @@ Losowanie prezentowe, w którym każdy losuje na własnym telefonie. Mały serwe
 1. Organizator wchodzi w **Panel organizatora** (przycisk na dole strony), loguje się tokenem i dodaje osoby (imię, e-mail opcjonalnie), pary oraz budżet.
 2. Klika **Otwórz losowanie** i wysyła uczestnikom link do strony.
 3. Uczestnik wybiera swoje imię, wpisuje e-mail i klika **Losuj**. Widzi wynik na ekranie i (jeśli skonfigurowano SMTP) dostaje kopię mailem.
-4. Losowanie można zrobić tylko raz. Kolejne wejście z tym samym e-mailem pokazuje ten sam wynik.
+4. Losowanie można zrobić tylko raz. Osoba, która już losowała, jest wyszarzona na liście i nie da się jej wybrać ponownie, więc wynik trzeba zapamiętać (albo zachować mail).
 
 Zasady losowania: nikt nie wylosuje siebie ani osoby z własnej pary, a opcjonalnie A→B wyklucza B→A. Serwer wybiera odbiorcę tak, żeby reszta osób zawsze mogła jeszcze dokończyć losowanie. Organizator nie widzi, kto kogo wylosował.
 
