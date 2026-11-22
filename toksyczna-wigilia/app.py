@@ -59,7 +59,7 @@ def db():
 def cfg(con):
     c = {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM config")}
     return {
-        "budget": int(c.get("budget", "100")),
+        "budget": int(c.get("budget", "70")),
         "no_mutual": c.get("no_mutual", "1") == "1",
         "opened": c.get("opened", "0") == "1",
     }
