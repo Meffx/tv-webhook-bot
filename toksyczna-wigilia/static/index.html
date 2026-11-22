@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Toksyczna Wigilia</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#f6f4f0; --surface:#ffffff; --fg:#1d2a24; --muted:#5f6d66; --line:#dcd8cf;
+  --accent:#b3261e; --accent-fg:#ffffff; --pine:#1f5a45; --pine-soft:#e3efe9;
+  --hero-bg:#1f5a45; --hero-fg:#f6f4f0; --snow:#b9cde0;
+  --font-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --font-body:"Inter","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121c18; --surface:#1a2822; --fg:#eef1ed; --muted:#9db0a7; --line:#2c3d36;
+  --accent:#e5594f; --accent-fg:#1a0b0a; --pine:#6fc2a1; --pine-soft:#223a31; --hero-bg:#1b3a2e; --hero-fg:#eef1ed; --snow:#ffffff; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#121c18; --surface:#1a2822; --fg:#eef1ed; --muted:#9db0a7; --line:#2c3d36;
+  --accent:#e5594f; --accent-fg:#1a0b0a; --pine:#6fc2a1; --pine-soft:#223a31; --hero-bg:#1b3a2e; --hero-fg:#eef1ed; --snow:#ffffff; color-scheme:dark;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:16px;line-height:1.5;
+  padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2{font-family:var(--font-display);text-wrap:balance;margin:0;line-height:1.1}
+h1{font-size:clamp(2rem,7vw,2.8rem);font-weight:700}
+h2{font-size:1.25rem;font-weight:700}
+p{margin:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.hint{color:var(--muted);font-size:.875rem}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{min-width:0}
+input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%}
+.row input,.row select{flex:1 1 150px;width:auto}
+input[type=checkbox]{width:auto}
+button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;padding:10px 16px;border:1px solid var(--line);background:var(--surface);color:var(--fg)}
+button:hover{border-color:var(--pine)}
+button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button.big{font-size:1.1rem;padding:14px 20px;width:100%}
+button.ghost{background:transparent}
+:focus-visible{outline:3px solid var(--pine);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--pine-soft);color:var(--pine);border-radius:999px;padding:4px 6px 4px 14px;font-weight:500}
+.chip button{border:0;background:transparent;padding:2px 8px;color:inherit;font-size:1.1rem;line-height:1}
+.check{display:flex;gap:10px;align-items:flex-start}
+.check input{margin-top:5px;accent-color:var(--pine)}
+.err{color:var(--accent);font-weight:500}
+.ok{color:var(--pine);font-weight:500}
+.reveal{text-align:center;align-items:center;padding:32px 20px;border-color:var(--accent)}
+.reveal .who{font-family:var(--font-display);font-size:clamp(2.2rem,10vw,3.4rem);font-weight:700;color:var(--accent);line-height:1.1;overflow-wrap:anywhere}
+.eyebrow{text-transform:uppercase;letter-spacing:.08em;font-size:.75rem;font-weight:600}
+.hero{position:relative;display:flex;flex-direction:column;gap:10px;background:var(--hero-bg);color:var(--hero-fg);border-radius:12px;padding:44px 22px 26px;overflow:hidden}
+.hero .eyebrow,.hero .lead{opacity:.85}
+.hero::before{content:"";position:absolute;inset:0 0 auto 0;height:26px;
+  background:
+    radial-gradient(circle at 10px 14px,#e5594f 0 5px,transparent 6px),
+    radial-gradient(circle at 30px 14px,#f2c14e 0 5px,transparent 6px),
+    radial-gradient(circle at 50px 14px,#6fc2a1 0 5px,transparent 6px),
+    radial-gradient(circle at 70px 14px,#7fb3e6 0 5px,transparent 6px);
+  background-size:80px 26px;background-repeat:repeat-x}
+.hero::after{content:"";position:absolute;inset:8px 0 auto 0;height:2px;background:rgba(255,255,255,.25)}
+.foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse}
+td{padding:6px 4px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+td:last-child{text-align:right;width:1%;white-space:nowrap}
+#snow{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:50}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="snow" aria-hidden="true"></canvas>
+<main>
+  <header class="hero">
+    <p class="eyebrow">Święta 2026</p>
+    <h1 id="title">Toksyczna Wigilia</h1>
+    <p class="lead">Wybierz swoje imię, wpisz e-mail i wylosuj osobę, której kupujesz prezent. Losowanie robisz raz i nikt poza tobą nie zobaczy wyniku.</p>
+  </header>
+
+  <section id="player" class="card">
+    <p id="closed" class="hint" hidden>Losowanie jeszcze się nie zaczęło. Wróć, gdy organizator je otworzy.</p>
+    <form id="drawForm" style="display:flex;flex-direction:column;gap:14px" hidden>
+      <label for="who">Kim jesteś?</label>
+      <select id="who" required></select>
+      <label for="email">Twój e-mail</label>
+      <input id="email" type="email" autocomplete="email" placeholder="ty@example.com" required>
+      <p class="hint" id="mailHint"></p>
+      <p class="err" id="drawErr" role="alert" hidden></p>
+      <button class="primary big" id="drawBtn" type="submit">Losuj</button>
+    </form>
+    <p class="hint" id="budgetInfo"></p>
+  </section>
+
+  <section id="reveal" class="card reveal" hidden aria-live="polite">
+    <p class="eyebrow" id="revFor"></p>
+    <p>kupuje prezent dla</p>
+    <p class="who" id="revWho"></p>
+    <p class="hint" id="revNote"></p>
+    <button class="primary" id="revClose" type="button">Zapamiętałem, zamknij</button>
+  </section>
+
+  <section id="admin" class="card" hidden>
+    <h2>Panel organizatora</h2>
+    <div id="login" style="display:flex;flex-direction:column;gap:10px">
+      <input id="token" type="password" placeholder="Token organizatora" autocomplete="off" aria-label="Token organizatora">
+      <button id="loginBtn" type="button">Zaloguj</button>
+    </div>
+    <div id="panel" style="display:flex;flex-direction:column;gap:18px" hidden>
+      <div>
+        <h2 style="font-size:1.05rem">Osoby</h2>
+        <form id="addForm" class="row" style="margin-top:8px">
+          <input id="aName" type="text" placeholder="Imię" maxlength="40" required aria-label="Imię">
+          <input id="aEmail" type="email" placeholder="E-mail (opcjonalnie)" aria-label="E-mail">
+          <button type="submit">Dodaj</button>
+        </form>
+        <p class="hint" style="margin-top:6px">Jeśli podasz e-mail, uczestnik musi wpisać dokładnie ten adres. Bez niego wpisze dowolny własny.</p>
+        <table id="peopleTbl" style="margin-top:8px"></table>
+      </div>
+      <div>
+        <h2 style="font-size:1.05rem">Pary</h2>
+        <div class="row" style="margin-top:8px">
+          <select id="pA" aria-label="Pierwsza osoba"></select>
+          <select id="pB" aria-label="Druga osoba"></select>
+          <button id="pAdd" type="button">Dodaj parę</button>
+        </div>
+        <ul id="pairs" class="chips" style="margin-top:8px"></ul>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="noMutual"><span>Jeśli A kupuje dla B, to B nie kupuje dla A</span></label>
+      </div>
+      <div class="row" style="align-items:center">
+        <label for="budget">Budżet (zł)</label>
+        <input id="budget" type="number" min="0" step="10" style="max-width:8rem">
+        <button id="budgetSave" type="button">Zapisz</button>
+      </div>
+      <p class="err" id="aErr" role="alert" hidden></p>
+      <p class="hint" id="aInfo"></p>
+      <div class="row">
+        <button class="primary" id="openBtn" type="button"></button>
+        <button class="ghost" id="resetBtn" type="button">Resetuj wyniki</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <button class="ghost" id="adminToggle" type="button">Panel organizatora</button>
+    <button class="ghost" id="themeBtn" type="button">Zmień motyw</button>
+  </div>
+</main>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  function api(method,url,body,token){
+    var h={"Content-Type":"application/json"};if(token)h["X-Admin-Token"]=token;
+    return fetch(url,{method:method,headers:h,body:body?JSON.stringify(body):undefined}).then(function(r){
+      return r.json().then(function(j){if(!r.ok)throw new Error(j.error||"Błąd serwera");return j});
+    });
+  }
+  function opt(sel,people){
+    sel.innerHTML="";people.forEach(function(p){var o=document.createElement("option");o.value=p.id;o.textContent=p.name;sel.appendChild(o)});
+  }
+  function show(el,msg){el.textContent=msg;el.hidden=!msg}
+
+  // ----- uczestnik -----
+  var S=null;
+  function loadState(){
+    return api("GET","/api/state").then(function(s){
+      S=s;
+      $("title").textContent=s.title;document.title=s.title;
+      $("closed").hidden=s.opened;
+      $("drawForm").hidden=!s.opened;
+      var sel=$("who"),cur=sel.value;
+      sel.innerHTML="";
+      var ph=document.createElement("option");ph.value="";ph.textContent="Wybierz imię";sel.appendChild(ph);
+      s.people.forEach(function(p){var o=document.createElement("option");o.value=p.id;o.textContent=p.name+(p.drawn?" ✓":"");sel.appendChild(o)});
+      sel.value=cur;
+      $("budgetInfo").textContent=s.budget?"Budżet na prezent: "+s.budget+" zł.":"";
+      $("mailHint").textContent=s.mail?"Kopię wyniku dostaniesz też mailem.":"";
+    }).catch(function(e){show($("drawErr"),e.message)});
+  }
+  $("drawForm").addEventListener("submit",function(e){
+    e.preventDefault();show($("drawErr"),"");
+    if(!$("who").value){show($("drawErr"),"Wybierz swoje imię.");return}
+    var name=$("who").options[$("who").selectedIndex].textContent.replace(" ✓","");
+    $("drawBtn").disabled=true;
+    api("POST","/api/draw",{person_id:+$("who").value,email:$("email").value}).then(function(r){
+      $("revFor").textContent=name;$("revWho").textContent=r.to;
+      var note=[];
+      if(r.already)note.push("Już losowałeś, to jest twój wcześniejszy wynik.");
+      if(r.budget)note.push("Budżet: "+r.budget+" zł.");
+      if(r.emailed)note.push("Wynik wysłaliśmy też na twój e-mail.");
+      $("revNote").textContent=note.join(" ");
+      $("player").hidden=true;$("reveal").hidden=false;
+    }).catch(function(err){show($("drawErr"),err.message)}).then(function(){$("drawBtn").disabled=false});
+  });
+  $("revClose").addEventListener("click",function(){
+    $("revWho").textContent="";$("reveal").hidden=true;$("player").hidden=false;$("email").value="";loadState();
+  });
+
+  // ----- organizator -----
+  var TOKEN="";
+  function render(a){
+    $("peopleTbl").innerHTML="";
+    a.people.forEach(function(p){
+      var tr=document.createElement("tr"),t1=document.createElement("td"),t2=document.createElement("td");
+      t1.textContent=p.name+(p.email?" ("+p.email+")":"")+(p.drawn?" ✓":"");
+      if(!a.started){var b=document.createElement("button");b.className="ghost";b.textContent="Usuń";b.setAttribute("aria-label","Usuń "+p.name);
+        b.onclick=function(){adm("DELETE","/api/admin/people/"+p.id)};t2.appendChild(b)}
+      tr.appendChild(t1);tr.appendChild(t2);$("peopleTbl").appendChild(tr);
+    });
+    opt($("pA"),a.people);opt($("pB"),a.people);if(a.people.length>1)$("pB").selectedIndex=1;
+    $("pairs").innerHTML="";
+    a.pairs.forEach(function(p){
+      var li=document.createElement("li");li.className="chip";li.appendChild(document.createTextNode(p.a+" ↔ "+p.b));
+      if(!a.started){var b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label","Usuń parę");b.onclick=function(){adm("DELETE","/api/admin/pairs/"+p.id)};li.appendChild(b)}
+      $("pairs").appendChild(li);
+    });
+    $("noMutual").checked=a.config.no_mutual;$("noMutual").disabled=a.started;
+    $("budget").value=a.config.budget;
+    var drawn=a.people.filter(function(p){return p.drawn}).length;
+    $("aInfo").textContent="Losowało "+drawn+" z "+a.people.length+" osób. "+
+      (a.mail?"Wysyłka maili działa.":"Wysyłka maili jest wyłączona (brak ustawień SMTP).")+
+      (a.solvable?"":" Przy obecnych ustawieniach losowanie jest niewykonalne.");
+    $("openBtn").textContent=a.config.opened?"Zamknij losowanie":"Otwórz losowanie";
+    $("openBtn").disabled=a.config.opened&&a.started;
+    $("openBtn").onclick=function(){adm("POST","/api/admin/config",{opened:!a.config.opened})};
+    $("resetBtn").hidden=!a.started;
+  }
+  function adm(method,url,body){
+    show($("aErr"),"");
+    return api(method,url,body,TOKEN).then(function(a){render(a);return loadState()}).catch(function(e){show($("aErr"),e.message)});
+  }
+  $("adminToggle").addEventListener("click",function(){$("admin").hidden=!$("admin").hidden});
+  $("loginBtn").addEventListener("click",function(){
+    TOKEN=$("token").value;
+    api("GET","/api/admin/state",null,TOKEN).then(function(a){$("login").hidden=true;$("panel").hidden=false;render(a)}).catch(function(e){alert_(e.message)});
+  });
+  function alert_(m){var p=$("aErr");show(p,m);}
+  $("addForm").addEventListener("submit",function(e){e.preventDefault();adm("POST","/api/admin/people",{name:$("aName").value,email:$("aEmail").value}).then(function(){$("aName").value="";$("aEmail").value="";$("aName").focus()})});
+  $("pAdd").addEventListener("click",function(){adm("POST","/api/admin/pairs",{a:$("pA").value,b:$("pB").value})});
+  $("noMutual").addEventListener("change",function(){adm("POST","/api/admin/config",{no_mutual:this.checked})});
+  $("budgetSave").addEventListener("click",function(){adm("POST","/api/admin/config",{budget:$("budget").value})});
+  var armed=false;
+  $("resetBtn").addEventListener("click",function(){
+    if(!armed){armed=true;show($("aErr"),"Wyniki wszystkich zostaną skasowane. Kliknij jeszcze raz, żeby potwierdzić.");setTimeout(function(){armed=false},6000);return}
+    armed=false;adm("POST","/api/admin/reset",{confirm:"RESET"});
+  });
+
+  $("themeBtn").addEventListener("click",function(){
+    var r=document.documentElement,dark=r.getAttribute("data-theme")==="dark"||(!r.getAttribute("data-theme")&&matchMedia("(prefers-color-scheme: dark)").matches);
+    r.setAttribute("data-theme",dark?"light":"dark");
+  });
+
+  loadState();
+  setInterval(function(){if($("reveal").hidden&&document.visibilityState==="visible")loadState()},30000);
+})();
+
+// ----- śnieg -----
+(function(){
+  var cv=document.getElementById("snow"),cx=cv.getContext("2d"),flakes=[],W=0,H=0;
+  var still=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function size(){
+    var d=window.devicePixelRatio||1;W=innerWidth;H=innerHeight;
+    cv.width=W*d;cv.height=H*d;cx.setTransform(d,0,0,d,0,0);
+    var n=Math.min(110,Math.round(W/10));
+    while(flakes.length<n)flakes.push({x:Math.random()*W,y:Math.random()*H,r:1+Math.random()*2.6,v:.35+Math.random()*.9,s:Math.random()*6.28,a:.4+Math.random()*.5});
+    flakes.length=n;
+  }
+  function paint(){
+    cx.clearRect(0,0,W,H);
+    cx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--snow").trim()||"#fff";
+    for(var i=0;i<flakes.length;i++){
+      var f=flakes[i];
+      if(!still){f.y+=f.v;f.s+=.01;f.x+=Math.sin(f.s)*.4;
+        if(f.y>H+5){f.y=-5;f.x=Math.random()*W}
+        if(f.x>W+5)f.x=-5;if(f.x<-5)f.x=W+5}
+      cx.globalAlpha=f.a;cx.beginPath();cx.arc(f.x,f.y,f.r,0,6.283);cx.fill();
+    }
+    cx.globalAlpha=1;
+    if(!still)requestAnimationFrame(paint);
+  }
+  size();paint();
+  addEventListener("resize",function(){size();if(still)paint()});
+})();
+</script>
+</body>
+</html>
