@@ -4,6 +4,7 @@ Dane trzyma SQLite, wyniki losowania zna tylko serwer. Organizator zarządza lis
 osób w panelu chronionym tokenem ADMIN_TOKEN. Organizator nie widzi, kto kogo wylosował.
 """
 import hmac
+import html
 import os
 import random
 import re
@@ -128,6 +129,51 @@ def mail_enabled():
     return bool(SMTP_HOST and SMTP_FROM)
 
 
+def build_email(giver, receiver, budget):
+    """Zwraca (tekst, html). HTML jest prosty (tabele, style inline), żeby działał w programach pocztowych."""
+    text = f"Cześć {giver}!\n\nW losowaniu \"{TITLE}\" kupujesz prezent dla: {receiver}.\n"
+    if budget:
+        text += f"Budżet: {budget} zł.\n"
+    text += "\nTo wiadomość automatyczna. Nie pokazuj jej nikomu, losowanie jest tajne.\n"
+
+    e = html.escape
+    display = "'Arial Narrow','Helvetica Neue',Impact,Arial,sans-serif"
+    mono = "'Courier New',Courier,monospace"
+    ink, red, tape = "#17130f", "#d4251c", "#f5c400"
+    stripes = "".join(
+        f'<td width="5%" height="14" bgcolor="{tape if i % 2 == 0 else ink}" style="font-size:0;line-height:0">&nbsp;</td>'
+        for i in range(20)
+    )
+    budget_row = (
+        f'<tr><td style="padding:0 28px 18px;font-family:{mono};font-size:13px;letter-spacing:1px;text-transform:uppercase;color:#5d564b">'
+        f"Budżet na prezent: {int(budget)} zł</td></tr>"
+        if budget else ""
+    )
+    page = f"""<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(TITLE)}</title></head>
+<body style="margin:0;padding:0;background:#c59a6b">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#c59a6b"><tr><td align="center" style="padding:0 12px 32px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{red}" style="max-width:560px"><tr>
+    <td align="center" style="padding:16px 12px 40px;font-family:{mono};font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#ffffff">Nie otwierać przed 24.12</td></tr></table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#fbfaf6" style="max-width:560px;margin-top:-24px;border:3px solid {ink}">
+    <tr><td style="border-bottom:3px solid {ink}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{stripes}</tr></table></td></tr>
+    <tr><td style="padding:22px 28px 18px;border-bottom:3px solid {ink}">
+      <div style="font-family:{display};font-weight:bold;font-size:44px;line-height:44px;text-transform:uppercase;color:{ink}">{e(TITLE)}</div>
+      <div style="margin-top:8px;font-family:{mono};font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#5d564b">Karta losowania prezentów &middot; edycja 2026 &middot; poufne</div>
+    </td></tr>
+    <tr><td style="padding:24px 28px 4px;font-family:{mono};font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#5d564b">{e(giver)}</td></tr>
+    <tr><td style="padding:0 28px;font-family:{display};font-weight:bold;font-size:24px;letter-spacing:1px;text-transform:uppercase;color:{ink}">kupujesz prezent dla</td></tr>
+    <tr><td style="padding:8px 28px 14px;font-family:{display};font-weight:bold;font-size:64px;line-height:64px;text-transform:uppercase;color:{red};word-break:break-word">{e(receiver)}</td></tr>
+    {budget_row}
+    <tr><td style="padding:0 28px 26px"><span style="display:inline-block;border:3px solid {red};padding:2px 10px;font-family:{display};font-weight:bold;font-size:18px;letter-spacing:3px;text-transform:uppercase;color:{red}">Poufne</span></td></tr>
+    <tr><td style="padding:16px 28px;border-top:2px solid {ink};font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#5d564b">
+      To wiadomość automatyczna. Nie pokazuj jej nikomu, losowanie jest tajne. Losowania nie można powtórzyć, więc zachowaj ten mail.</td></tr>
+  </table>
+</td></tr></table>
+</body></html>"""
+    return text, page
+
+
 def send_mail(to, giver, receiver, budget):
     if not mail_enabled():
         return False
@@ -135,11 +181,9 @@ def send_mail(to, giver, receiver, budget):
     msg["Subject"] = f"{TITLE}: Twój wynik losowania"
     msg["From"] = SMTP_FROM
     msg["To"] = to
-    body = f"Cześć {giver}!\n\nW losowaniu \"{TITLE}\" kupujesz prezent dla: {receiver}.\n"
-    if budget:
-        body += f"Budżet: {budget} zł.\n"
-    body += "\nTo wiadomość automatyczna. Nie pokazuj jej nikomu, losowanie jest tajne.\n"
-    msg.set_content(body)
+    text, page = build_email(giver, receiver, budget)
+    msg.set_content(text)
+    msg.add_alternative(page, subtype="html")
     try:
         if SMTP_PORT == 465:
             with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context(), timeout=15) as s:
